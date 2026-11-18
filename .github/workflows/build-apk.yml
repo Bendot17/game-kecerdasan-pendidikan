@@ -1,0 +1,72 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.zip"
+      - ".github/workflows/build-apk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Extract uploaded game project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extracted
+          zip_file="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+          if [ -z "$zip_file" ]; then
+            echo "Tidak ditemukan file ZIP proyek di root repository."
+            exit 1
+          fi
+          echo "Menggunakan arsip: $zip_file"
+          unzip -q "$zip_file" -d extracted
+          project_settings="$(find extracted -type f -name settings.gradle -print -quit)"
+          if [ -z "$project_settings" ]; then
+            echo "settings.gradle tidak ditemukan di dalam ZIP."
+            echo "Pastikan ZIP berisi proyek Android Studio."
+            exit 1
+          fi
+          project_dir="$(dirname "$project_settings")"
+          echo "ANDROID_PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Proyek Android ditemukan di: $project_dir"
+
+      - name: Build debug APK
+        run: |
+          cd "$ANDROID_PROJECT_DIR"
+          gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Game-Kecerdasan-Pendidikan-debug-apk
+          path: extracted/**/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
