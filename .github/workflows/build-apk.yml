@@ -30,7 +30,7 @@ jobs:
 
       - name: Install Android SDK components
         run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
@@ -50,25 +50,45 @@ jobs:
             exit 1
           fi
 
-          echo "Menggunakan arsip: $zip_file"
           unzip -q "$zip_file" -d extracted
 
           project_settings="$(find extracted -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
 
           if [ -z "$project_settings" ]; then
-            echo "File settings.gradle atau settings.gradle.kts tidak ditemukan."
+            echo "File settings.gradle tidak ditemukan."
             exit 1
           fi
 
           project_dir="$(dirname "$project_settings")"
           echo "ANDROID_PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Proyek ditemukan: $project_dir"
 
-          echo "Proyek ditemukan di: $project_dir"
+      - name: Configure Java and Kotlin JVM target 17
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/force-jvm17.init.gradle" <<'EOF'
+          allprojects {
+              afterEvaluate {
+                  tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
+                      sourceCompatibility = '17'
+                      targetCompatibility = '17'
+                  }
+
+                  tasks.configureEach { task ->
+                      if (task.name.toLowerCase().contains('kotlin') && task.hasProperty('kotlinOptions')) {
+                          task.kotlinOptions.jvmTarget = '17'
+                      }
+                  }
+              }
+          }
+          EOF
 
       - name: Build debug APK
         run: |
           cd "$ANDROID_PROJECT_DIR"
-          gradle --no-daemon --stacktrace assembleDebug
+          gradle --no-daemon --stacktrace \
+            --init-script "$RUNNER_TEMP/force-jvm17.init.gradle" \
+            assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
